@@ -1,6 +1,6 @@
 # Usage
 ```
-~# python kube2pyconsul.py --help
+# python kube2pyconsul.py --help
 kube2pyconsul.
 
 Usage:
@@ -17,5 +17,7 @@ Options:
 ```
 
 Running a docker container:
-`~# docker run -ti zogg/kube2pyconsul:1.0 --consul-agent=https://10.0.0.4:8500 --kube-master=https://10.10.64.1:6443 --cons
-ul-auth=user,pass --kube-auth=user,pass`
+`# docker run -ti zogg/kube2pyconsul:1.0 --consul-agent=https://10.0.0.4:8500 \
+                                         --kube-master=https://10.10.64.1:6443 \
+                                         --consul-auth=user,pass \
+                                         --kube-auth=user,pass`
