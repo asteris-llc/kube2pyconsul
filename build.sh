@@ -1,3 +1,3 @@
 #!/bin/bash
 
-docker build -t zogg/kube2pyconsul:1.0 .
+docker build -t ciscocloud/kube2pyconsul:1.0 .
