@@ -21,11 +21,15 @@ import time
 import logging
 import requests
 import traceback
+import multiprocessing
+
+from multiprocessing import Queue
+from multiprocessing import Process
 
 args = docopt(__doc__, version='kube2pyconsul 1.0')
 
 logging.basicConfig()
-log = logging.getLogger('kube2pyconsul')
+log = multiprocessing.log_to_stderr()
 level = logging.getLevelName(args['-v'])
 log.setLevel(level)
 
@@ -47,45 +51,110 @@ def getservice(event, ports):
             "Address": event['object']['spec']['clusterIP'], 
             "Port": ports['port']}
 
-def run():
-    r = requests.get('{base}/api/v1/services?watch=true'.format(base=kubeapi_uri), 
-                         stream=True, verify=verify_ssl, auth=kube_auth)
-    
-    for line in r.iter_lines():
-        if line:
-            sys.stdout.flush()
-            event = json.loads(line)
-
-            if event['type'] == 'ADDED':
-                for ports in event['object']['spec']['ports']:
-                    service = getservice(event, ports)
-                    r = requests.put('{base}/v1/agent/service/register'.format(base=consul_uri), 
-                                          json=service, auth=consul_auth, verify=verify_ssl)
-                    if r.status_code == 200:
-                        log.info("ADDED service {service} to Consul's catalog".format(service=service))
-                    else:
-                        log.error("Consul returned non-200 request status code. Could not register service {service}. Continuing on to the next service...".format())
-
-            elif event['type'] == 'DELETED':
-                for ports in event['object']['spec']['ports']:
-                    service = getservice(event, ports)
-                    r = requests.put('{base}/v1/agent/service/deregister/{name}-{port}'.format(base=consul_uri, name=service['name'], port=service['port']), 
-                                     auth=consul_auth, verify=verify_ssl)
-                    if r.status_code == 200:
-                        log.info("DELETED service {service} from Consul's catalog".format(service=service))
-                    else:
-                        log.error("Consul returned non-200 request status code. Could not deregister service {service}. Continuing on to the next service...".format())
-        sys.stdout.flush()
-
-
-if __name__ == '__main__':
+def services_monitor(queue):
     while True:
         try:
-          run()
-        except KeyboardInterrupt:
-          exit()
+            r = requests.get('{base}/api/v1/services?watch=true'.format(base=kubeapi_uri), 
+                                 stream=True, verify=verify_ssl, auth=kube_auth)
+            for line in r.iter_lines():
+                if line:
+                    event = json.loads(line)
+                    queue.put(('service', event))
         except Exception as e:
           log.debug(traceback.format_exc())
           log.error(e)
           log.error("Sleeping and restarting afresh.")
           time.sleep(10)
+
+    
+def pods_monitor(queue):
+    while True:
+        try:
+            r = requests.get('{base}/api/v1/pods?watch=true'.format(base=kubeapi_uri), 
+                                 stream=True, verify=verify_ssl, auth=kube_auth)
+            for line in r.iter_lines():
+                if line:
+                    event = json.loads(line)
+                    queue.put(('pod', event))
+        except Exception as e:
+          log.debug(traceback.format_exc())
+          log.error(e)
+          log.error("Sleeping and restarting afresh.")
+          time.sleep(10)
+
+
+def registration(queue):
+    while True:
+        context, event = queue.get(block=True)
+        
+        if context == 'service':
+            if event['type'] == 'ADDED':
+                for ports in event['object']['spec']['ports']:
+                    service = getservice(event, ports)
+                    r = ''
+                    
+                    while True:
+                        try:
+                            r = requests.put('{base}/v1/agent/service/register'.format(base=consul_uri), 
+                                                  json=service, auth=consul_auth, verify=verify_ssl)
+                            break
+                        except Exception as e:
+                            log.debug(traceback.format_exc())
+                            log.error(e)
+                            log.error("Sleeping and retrying.")
+                            time.sleep(10)
+                            
+                    if r.status_code == 200:
+                        log.info("ADDED service {service} to Consul's catalog".format(service=service))
+                    else:
+                        log.error("Consul returned non-200 request status code. Could not register service {service}. Continuing on to the next service...".format())
+                    sys.stdout.flush()
+
+            elif event['type'] == 'DELETED':
+                for ports in event['object']['spec']['ports']:
+                    service = getservice(event, ports)
+                    r = ''
+                    
+                    while True:
+                        try:
+                            r = requests.put('{base}/v1/agent/service/deregister/{name}-{port}'.format(base=consul_uri, name=service['name'], port=service['port']), 
+                                             auth=consul_auth, verify=verify_ssl)
+                            break
+                        except Exception as e:
+                            log.debug(traceback.format_exc())
+                            log.error(e)
+                            log.error("Sleeping and retrying.")
+                            time.sleep(10)
+                            
+                    if r.status_code == 200:
+                        log.info("DELETED service {service} from Consul's catalog".format(service=service))
+                    else:
+                        log.error("Consul returned non-200 request status code. Could not deregister service {service}. Continuing on to the next service...".format())
+                    sys.stdout.flush()
+                      
+        elif context == 'pod':
+            pass
+        
+        
+def run():
+    q = Queue()
+    services_watch = Process(target=services_monitor, args=(q,), name='kube2pyconsul/services')
+    pods_watch = Process(target=pods_monitor, args=(q,), name='kube2pyconsul/pods')
+    consul_desk = Process(target=registration, args=(q,), name='kube2pyconsul/registration')
+    
+    services_watch.start()
+    pods_watch.start()
+    consul_desk.start()
+    
+    try:
+        while True:
+            time.sleep(10)
+    except KeyboardInterrupt:
+        services_watch.terminate()
+        pods_watch.terminate()
+        consul_desk.terminate()
+        
+        exit()
+
+if __name__ == '__main__':
+    run()
