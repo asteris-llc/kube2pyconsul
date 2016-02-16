@@ -1,7 +1,7 @@
 """kube2pyconsul.
 
 Usage:
-  kube2pyconsul.py [-v <loglevel>] [--verify-ssl] [--consul-agent=<consul-uri>] [--kube-master=<kubeapi-uri>] [--consul-auth=<user,pass>] [--kube-auth=<user,pass>]
+  kube2pyconsul.py [-v <loglevel>] [--verify-ssl=<value>] [--consul-agent=<consul-uri>] [--kube-master=<kubeapi-uri>] [--consul-auth=<user,pass>] [--kube-auth=<user,pass>]
   kube2pyconsul.py (-h | --help)
 
 Options:
@@ -11,6 +11,7 @@ Options:
   --kube-master=<kubeapi-uri>  Kubeapi location [default: https://127.0.0.1:6443]
   --consul-auth=<user,pass>    Consul http auth credentials [default: None]
   --kube-auth=<user,pass>      Kubernetes http auth credentials [default: None]
+  --verify-ssl=<value>         Option to enable or disable SSL certificate validation [default: False]
 
 """
 from docopt import docopt
